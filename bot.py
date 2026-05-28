@@ -24,7 +24,7 @@ SUPER_ID     = 7194320806
 LINK_SUPORTE = "https://t.me/geovannapriv"
 # ─────────────────────────────────────────────
 
-DB_FILE = "banco.json"
+DB_FILE = "/app/data/banco.json"
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -36,6 +36,7 @@ logging.basicConfig(
 # ══════════════════════════════════════════════
 def carregar_db():
     if not os.path.exists(DB_FILE):
+        os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
         return {
             "apresentacao": {
                 "tipo": "texto",
@@ -59,6 +60,7 @@ def carregar_db():
         return json.load(f)
 
 def salvar_db(db):
+    os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(db, f, ensure_ascii=False, indent=2)
 
@@ -158,11 +160,11 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     markup = InlineKeyboardMarkup(teclado) if teclado else None
 
     if ap["tipo"] == "texto":
-        await update.message.reply_text(ap["texto"], reply_markup=markup)
+        await update.message.reply_text(ap["texto"], reply_markup=markup, protect_content=True)
     elif ap["tipo"] == "foto":
-        await update.message.reply_photo(photo=ap["file_id"], caption=ap.get("texto", ""), reply_markup=markup)
+        await update.message.reply_photo(photo=ap["file_id"], caption=ap.get("texto", ""), reply_markup=markup, protect_content=True)
     elif ap["tipo"] == "video":
-        await update.message.reply_video(video=ap["file_id"], caption=ap.get("texto", ""), reply_markup=markup)
+        await update.message.reply_video(video=ap["file_id"], caption=ap.get("texto", ""), reply_markup=markup, protect_content=True)
 
 # ══════════════════════════════════════════════
 #  /status
@@ -323,12 +325,14 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     caption=texto,
                     parse_mode="Markdown",
                     reply_markup=InlineKeyboardMarkup(teclado),
+                    protect_content=True,
                 )
             else:
                 await query.message.reply_text(
                     texto,
                     parse_mode="Markdown",
                     reply_markup=InlineKeyboardMarkup(teclado),
+                    protect_content=True,
                 )
 
         except Exception as e:
