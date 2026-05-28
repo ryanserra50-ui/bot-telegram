@@ -22,6 +22,13 @@ from telegram.ext import (
 BOT_TOKEN    = "8996653670:AAFJladKB7_eVP39PGXVnloLJ9w0MWk2Ddo"
 SUPER_ID     = 7194320806
 LINK_SUPORTE = "https://t.me/geovannapriv"
+
+# ── Proxy Webshare (IP fixo para MisticPay) ──
+PROXY_HOST = "38.154.203.95"
+PROXY_PORT = "5863"
+PROXY_USER = "koambcwr"
+PROXY_PASS = "92gqb5jax4ut"
+PROXY_URL  = f"http://{PROXY_USER}:{PROXY_PASS}@{PROXY_HOST}:{PROXY_PORT}"
 # ─────────────────────────────────────────────
 
 DB_FILE = "banco.json"
@@ -56,14 +63,19 @@ def carregar_db():
             "usuarios": {},
         }
     with open(DB_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+    # Limpa chaves vazias de pagamentos pendentes
+    data["pagamentos_pendentes"] = {
+        k: v for k, v in data.get("pagamentos_pendentes", {}).items() if k
+    }
+    return data
 
 def salvar_db(db):
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(db, f, ensure_ascii=False, indent=2)
 
 # ══════════════════════════════════════════════
-#  MISTICPAY  –  Gerar cobrança PIX
+#  MISTICPAY  –  Gerar cobrança PIX (com proxy)
 # ══════════════════════════════════════════════
 async def criar_cobranca_pix(client_id, client_secret, amount, payer_name, descricao):
     url = "https://api.misticpay.com/api/transactions/create"
@@ -80,19 +92,21 @@ async def criar_cobranca_pix(client_id, client_secret, amount, payer_name, descr
         "description": descricao,
     }
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=payload, headers=headers) as resp:
+        async with session.post(
+            url, json=payload, headers=headers, proxy=PROXY_URL
+        ) as resp:
             resultado = await resp.json()
             logging.info(f"MisticPay resposta: {resultado}")
             return resultado
 
 # ══════════════════════════════════════════════
-#  MISTICPAY  –  Verificar pagamento
+#  MISTICPAY  –  Verificar pagamento (com proxy)
 # ══════════════════════════════════════════════
 async def verificar_pagamento(client_id, client_secret, transaction_id):
     url = f"https://api.misticpay.com/api/transactions/{transaction_id}"
     headers = {"ci": client_id, "cs": client_secret}
     async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as resp:
+        async with session.get(url, headers=headers, proxy=PROXY_URL) as resp:
             return await resp.json()
 
 # ══════════════════════════════════════════════
@@ -116,7 +130,7 @@ async def testar_gateway(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         url = "https://api.misticpay.com/api/users/balance"
         headers = {"ci": ci, "cs": cs}
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as resp:
+            async with session.get(url, headers=headers, proxy=PROXY_URL) as resp:
                 resultado = await resp.json()
                 status_code = resp.status
 
@@ -147,7 +161,6 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ap = db["apresentacao"]
     planos = db.get("planos", [])
 
-    # Monta botões de compra se tiver planos
     teclado = []
     for i, plano in enumerate(planos):
         teclado.append([InlineKeyboardButton(
@@ -158,11 +171,11 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     markup = InlineKeyboardMarkup(teclado) if teclado else None
 
     if ap["tipo"] == "texto":
-        await update.message.reply_text(ap["texto"], reply_markup=markup)
+        await update.message.reply_text(ap["texto"], reply_markup=markup, protect_content=True)
     elif ap["tipo"] == "foto":
-        await update.message.reply_photo(photo=ap["file_id"], caption=ap.get("texto", ""), reply_markup=markup)
+        await update.message.reply_photo(photo=ap["file_id"], caption=ap.get("texto", ""), reply_markup=markup, protect_content=True)
     elif ap["tipo"] == "video":
-        await update.message.reply_video(video=ap["file_id"], caption=ap.get("texto", ""), reply_markup=markup)
+        await update.message.reply_video(video=ap["file_id"], caption=ap.get("texto", ""), reply_markup=markup, protect_content=True)
 
 # ══════════════════════════════════════════════
 #  /status
@@ -228,7 +241,7 @@ async def mostrar_super(msg, ctx):
     await msg.reply_text(
         "🛠️ *Menu Super Admin*\n\nO que deseja configurar?",
         parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(teclado),
+        reply_markup=InlineKeyboardMarkup(teclado), protect_content=True,
     )
 
 # ══════════════════════════════════════════════
@@ -264,7 +277,6 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 del db["pagamentos_pendentes"][tx_id_antigo]
         salvar_db(db)
 
-        # Manda mensagem nova de "aguarde"
         aguarde_msg = await query.message.reply_text("⏳ Gerando seu PIX, aguarde...")
 
         try:
@@ -285,6 +297,13 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             logging.info(f"qr_url: {qr_url}")
             logging.info(f"resp completo: {resp}")
             logging.info(f"=====================================")
+
+            if not tx_id:
+                await aguarde_msg.edit_text(
+                    f"❌ Erro ao gerar PIX!\n\nResposta da MisticPay: `{resp}`",
+                    parse_mode="Markdown"
+                )
+                return
 
             # Salva pagamento pendente
             db["pagamentos_pendentes"][tx_id] = {
@@ -312,7 +331,6 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
             await aguarde_msg.delete()
 
-            # Baixa o QR code e envia como bytes (evita cache do Telegram)
             if qr_url:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(qr_url) as r:
@@ -322,13 +340,13 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     photo=BytesIO(qr_bytes),
                     caption=texto,
                     parse_mode="Markdown",
-                    reply_markup=InlineKeyboardMarkup(teclado),
+                    reply_markup=InlineKeyboardMarkup(teclado), protect_content=True,
                 )
             else:
                 await query.message.reply_text(
                     texto,
                     parse_mode="Markdown",
-                    reply_markup=InlineKeyboardMarkup(teclado),
+                    reply_markup=InlineKeyboardMarkup(teclado), protect_content=True,
                 )
 
         except Exception as e:
@@ -384,7 +402,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await query.message.reply_text(
                     "⏳ *Pagamento ainda não identificado.*\n\nAguarde alguns segundos e tente novamente.",
                     parse_mode="Markdown",
-                    reply_markup=InlineKeyboardMarkup(teclado),
+                    reply_markup=InlineKeyboardMarkup(teclado), protect_content=True,
                 )
         except Exception as e:
             await query.answer(f"Erro: {str(e)}", show_alert=True)
@@ -431,7 +449,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             f"🛒 *Botões de Compra / Planos*\n\n{lista}\n\nO que deseja fazer?",
             parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(teclado),
+            reply_markup=InlineKeyboardMarkup(teclado), protect_content=True,
         )
 
     elif data == "plano_add":
@@ -462,7 +480,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             db["planos"] = planos
             salvar_db(db)
             await query.answer(f"✅ Plano '{removido['nome']}' removido!", show_alert=True)
-        await callback_handler(update, ctx)  # volta pra lista
+        await callback_handler(update, ctx)
 
     # ── Grupo ──────────────────────────────────
     elif data == "cfg_grupo":
@@ -512,7 +530,6 @@ async def receber_configuracao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     ctx.user_data["aguardando"] = None
 
-    # ── Apresentação ───────────────────────────
     if aguardando == "apresentacao":
         if msg.text:
             db["apresentacao"] = {"tipo": "texto", "texto": msg.text, "file_id": None}
@@ -530,7 +547,6 @@ async def receber_configuracao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await msg.reply_text("⚠️ Envie texto, foto ou vídeo.")
             return
 
-    # ── Plano ──────────────────────────────────
     elif aguardando == "plano_add":
         try:
             partes = [p.strip() for p in msg.text.split("|")]
@@ -543,7 +559,6 @@ async def receber_configuracao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except:
             await msg.reply_text("⚠️ Formato inválido. Use:\n`nome | preço | dias`\nEx: `VIP | 29.90 | 30`", parse_mode="Markdown")
 
-    # ── Grupo ──────────────────────────────────
     elif aguardando == "grupo":
         try:
             partes = [p.strip() for p in msg.text.split("|")]
@@ -558,7 +573,6 @@ async def receber_configuracao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except:
             await msg.reply_text("⚠️ Formato inválido. Use:\n`link | dias | id_do_grupo`\nEx: `https://t.me/+abc | 30 | -1001234567890`", parse_mode="Markdown")
 
-    # ── Gateway ────────────────────────────────
     elif aguardando == "gateway":
         try:
             partes = [p.strip() for p in msg.text.split("|")]
@@ -582,13 +596,11 @@ async def bot_adicionado_grupo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat = resultado.chat
     novo_status = resultado.new_chat_member
 
-    # Só age em grupos/supergrupos
     if chat.type not in ("group", "supergroup"):
         return
 
     bot_id = ctx.bot.id
 
-    # Bot foi promovido a admin
     if (
         novo_status.user.id == bot_id
         and novo_status.status in ("administrator",)
@@ -596,8 +608,6 @@ async def bot_adicionado_grupo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         db = carregar_db()
         db["grupo"]["grupo_id"] = chat.id
         salvar_db(db)
-
-        # Avisa o admin no privado
         try:
             await ctx.bot.send_message(
                 SUPER_ID,
@@ -610,7 +620,6 @@ async def bot_adicionado_grupo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except:
             pass
 
-    # Bot foi removido ou rebaixado
     elif (
         novo_status.user.id == bot_id
         and novo_status.status in ("left", "kicked", "member", "restricted")
@@ -631,7 +640,9 @@ async def bot_adicionado_grupo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             except:
                 pass
 
-
+# ══════════════════════════════════════════════
+#  VERIFICAÇÃO DE EXPIRADOS
+# ══════════════════════════════════════════════
 async def verificar_expirados(app):
     while True:
         try:
@@ -646,7 +657,6 @@ async def verificar_expirados(app):
                     expira = datetime.fromisoformat(dados["expira"])
                     dias_restantes = (expira - agora).days
 
-                    # Avisa 1 dia antes de expirar
                     if dias_restantes == 1 and not dados.get("aviso_enviado"):
                         try:
                             await app.bot.send_message(
@@ -661,12 +671,11 @@ async def verificar_expirados(app):
                         except:
                             pass
 
-                    # Remove se expirou
                     if agora > expira:
                         if grupo_id:
                             try:
                                 await app.bot.ban_chat_member(grupo_id, int(uid))
-                                await app.bot.unban_chat_member(grupo_id, int(uid))  # unban pra não bloquear permanente
+                                await app.bot.unban_chat_member(grupo_id, int(uid))
                             except:
                                 pass
                         try:
@@ -692,10 +701,10 @@ async def verificar_expirados(app):
         except Exception as e:
             logging.error(f"Erro na verificação de expirados: {e}")
 
-        await asyncio.sleep(3600)  # Verifica a cada 1 hora
+        await asyncio.sleep(3600)
 
 # ══════════════════════════════════════════════
-#  Menu do bot
+#  MENU DO BOT
 # ══════════════════════════════════════════════
 async def post_init(app):
     await app.bot.set_my_commands([
@@ -703,7 +712,6 @@ async def post_init(app):
         BotCommand("status",  "📊 Ver minha assinatura"),
         BotCommand("suporte", "💬 Falar com suporte"),
     ])
-    # Inicia a tarefa de remoção automática
     asyncio.create_task(verificar_expirados(app))
 
 # ══════════════════════════════════════════════
