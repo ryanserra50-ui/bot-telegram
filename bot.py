@@ -449,7 +449,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             f"🛒 *Botões de Compra / Planos*\n\n{lista}\n\nO que deseja fazer?",
             parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(teclado), protect_content=True,
+            reply_markup=InlineKeyboardMarkup(teclado),
         )
 
     elif data == "plano_add":
