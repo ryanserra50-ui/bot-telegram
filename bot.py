@@ -37,6 +37,33 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # ══════════════════════════════════════════════
+#  PREÇOS - aceita 14,90 / 14.90 / R$ 14,90
+# ══════════════════════════════════════════════
+def preco_para_float(valor):
+    s = str(valor).strip()
+    s = s.replace("R$", "").replace(" ", "").replace("−", "-")
+    # tolera valores antigos salvos como "- R$ 14.90"
+    while s.startswith("-"):
+        s = s[1:]
+
+    if "," in s and "." in s:
+        # Se a vírgula vier por último, assume formato brasileiro: 1.234,56
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            # Formato 1,234.56
+            s = s.replace(",", "")
+    else:
+        s = s.replace(",", ".")
+
+    return float(s)
+
+
+def formatar_preco(valor):
+    return f"{preco_para_float(valor):.2f}".replace(".", ",")
+
+
+# ══════════════════════════════════════════════
 #  BANCO DE DADOS
 # ══════════════════════════════════════════════
 def carregar_db():
@@ -156,7 +183,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     teclado = []
     for i, plano in enumerate(planos):
         teclado.append([InlineKeyboardButton(
-            f"{plano['nome']} R$ {plano['preco']}",
+            f"{plano['nome']} R$ {formatar_preco(plano['preco'])}",
             callback_data=f"comprar_{i}"
         )])
 
@@ -276,7 +303,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             user = query.from_user
             resp = await criar_cobranca_pix(
                 gw["client_id"], gw["client_secret"],
-                float(plano["preco"].replace(",", ".")), user.first_name,
+                preco_para_float(plano["preco"]), user.first_name,
                 f"Plano: {plano['nome']}"
             )
             tx_data = resp.get("data", {})
@@ -303,8 +330,8 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
             texto = (
                 f"💳 *Pagamento PIX*\n\n"
-                f"📦 Plano: *{plano['nome']} R$ {plano['preco']}*\n"
-                f"💰 Valor: *R$ {plano['preco']}*\n"
+                f"📦 Plano: *{plano['nome']} R$ {formatar_preco(plano['preco'])}*\n"
+                f"💰 Valor: *R$ {formatar_preco(plano['preco'])}*\n"
                 f"⏱️ Acesso: *{plano.get('dias', db['grupo']['dias'])} dias*\n\n"
                 f"─────────────────\n"
                 f"📋 *Copia e Cola PIX:*\n`{copy_paste}`\n\n"
@@ -425,7 +452,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # ── Planos ─────────────────────────────────
     elif data == "cfg_planos":
         planos = db.get("planos", [])
-        lista = "\n".join([f"{i+1}. {p['nome']} — R$ {p['preco']} — {p.get('dias',30)} dias" for i, p in enumerate(planos)]) or "_(nenhum plano cadastrado)_"
+        lista = "\n".join([f"{i+1}. {p['nome']} — R$ {formatar_preco(p['preco'])} — {p.get('dias',30)} dias" for i, p in enumerate(planos)]) or "_(nenhum plano cadastrado)_"
         teclado = [
             [InlineKeyboardButton("➕ Adicionar plano", callback_data="plano_add")],
             [InlineKeyboardButton("🗑️ Remover plano", callback_data="plano_remove")],
@@ -469,7 +496,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         salvar_db(db)
 
         lista = "\n".join(
-            [f"{i+1}. {p['nome']} — R$ {p['preco']} — {p.get('dias', 30)} dias" for i, p in enumerate(planos)]
+            [f"{i+1}. {p['nome']} — R$ {formatar_preco(p['preco'])} — {p.get('dias', 30)} dias" for i, p in enumerate(planos)]
         ) or "_(nenhum plano cadastrado)_"
         teclado = [
             [InlineKeyboardButton("➕ Adicionar plano", callback_data="plano_add")],
@@ -554,14 +581,15 @@ async def receber_configuracao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif aguardando == "plano_add":
         try:
             partes = [p.strip() for p in msg.text.split("|")]
-            nome, preco, dias = partes[0], partes[1], int(partes[2])
+            nome, preco_digitado, dias = partes[0], partes[1], int(partes[2])
+            preco = formatar_preco(preco_digitado)
             if "planos" not in db:
                 db["planos"] = []
             db["planos"].append({"nome": nome, "preco": preco, "dias": dias})
             salvar_db(db)
             await msg.reply_text(f"✅ *Plano adicionado!*\n\n📦 {nome}\n💰 R$ {preco}\n⏱️ {dias} dias", parse_mode="Markdown")
         except:
-            await msg.reply_text("⚠️ Formato inválido. Use:\n`nome | preço | dias`\nEx: `VIP | 29.90 | 30`", parse_mode="Markdown")
+            await msg.reply_text("⚠️ Formato inválido. Use:\n`nome | preço | dias`\nEx: `VIP | 14,90 | 30`", parse_mode="Markdown")
 
     # ── Grupo ──────────────────────────────────
     elif aguardando == "grupo":
