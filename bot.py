@@ -702,18 +702,18 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ctx.user_data["aguardando"] = "gateway"
 
     elif data == "voltar_super":
-    ctx.user_data["aguardando"] = None
-    teclado = [
-        [InlineKeyboardButton("✏️ Texto de Apresentação", callback_data="cfg_apresentacao")],
-        [InlineKeyboardButton("🛒 Botões de Compra / Planos", callback_data="cfg_planos")],
-        [InlineKeyboardButton("💳 Gateway MisticPay", callback_data="cfg_gateway")],
-    ]
-    await query.edit_message_text(
-        "🛠️ *Menu Super Admin*\n\nO que deseja configurar?",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(teclado),
-    )
-    return
+        ctx.user_data["aguardando"] = None
+        teclado = [
+            [InlineKeyboardButton("✏️ Texto de Apresentação", callback_data="cfg_apresentacao")],
+            [InlineKeyboardButton("🛒 Botões de Compra / Planos", callback_data="cfg_planos")],
+            [InlineKeyboardButton("💳 Gateway MisticPay", callback_data="cfg_gateway")],
+        ]
+        await query.edit_message_text(
+            "🛠️ *Menu Super Admin*\n\nO que deseja configurar?",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(teclado),
+        )
+        return
 
 # ══════════════════════════════════════════════
 #  RECEBE CONFIGURAÇÃO DO ADMIN
